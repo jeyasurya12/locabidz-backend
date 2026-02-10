@@ -1,0 +1,44 @@
+name: Deploy to EC2 (Ubuntu 24)
+
+on:
+  push:
+    branches:
+      - main   # Trigger on push to the main branch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # SSH into the EC2 instance and execute deployment commands
+      - name: SSH into EC2 and deploy
+        run: |
+          # Create the .ssh directory if it doesn't exist
+          mkdir -p ~/.ssh
+
+          # Write the SSH private key to a temporary file
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+
+          # Optional: Add EC2 host to known hosts to avoid SSH warnings
+          ssh-keyscan -H ${{ secrets.EC2_PUBLIC_IP }} >> ~/.ssh/known_hosts
+
+          # SSH to EC2 and execute commands
+          ssh -i ~/.ssh/id_rsa ubuntu@${{ secrets.EC2_PUBLIC_IP }} << 'EOF'
+            cd /home/ubuntu/contractor-backend
+
+            # Pull the latest changes from GitHub
+            git pull origin main
+
+            # Install production dependencies
+            npm install
+
+            # Stop the app if it's running using PM2
+            pm2 stop contractor-backend
+
+            # Start the app with PM2 using the ecosystem.config.js
+            pm2 start ecosystem.config.js --env production
+
+            # Save PM2 process list for auto restart after server reboot
+            pm2 save
+          EOF
