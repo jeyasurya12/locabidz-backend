@@ -8,16 +8,6 @@ const { createConnectAccount } = require("../lib/libStripe");
 const Log = require("../model/log");
 const saltRounds = 10;
 
-const withTimeout = (promise, timeoutMs, timeoutMessage) => {
-  let timeoutId;
-  const timeoutPromise = new Promise((_, reject) => {
-    timeoutId = setTimeout(() => {
-      reject(new Error(timeoutMessage));
-    }, timeoutMs);
-  });
-  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
-};
-
 const signup = async (req, res) => {
   const { email, phoneNumber } = req.body;
   try {
@@ -54,11 +44,9 @@ const signup = async (req, res) => {
       }
     }
     try {
-      const mailTimeoutMs = Number(process.env.MAIL_SEND_TIMEOUT_MS || 15000);
-      await withTimeout(
-        sendMail({
-          to: email,
-          html: `
+      await sendMail({
+        to: email,
+        html: `
       <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.5;">
           <h2 style="color: #007BFF;">Verify Your Email</h2>
           <p>Hello,</p>
@@ -77,10 +65,7 @@ const signup = async (req, res) => {
           <p>Best regards,<br>Locabidz Team</p>
       </div>
   `,
-        }),
-        mailTimeoutMs,
-        "Email service timed out. Please try again."
-      );
+      });
     } catch (mailErr) {
       if (process.env.NODE_ENV !== "production") {
         console.log(
@@ -240,15 +225,10 @@ const resendEmail = async (req, res) => {
       verifyToken,
       verifyTokenCreatedAt: moment().utc(),
     });
-    const mailTimeoutMs = Number(process.env.MAIL_SEND_TIMEOUT_MS || 15000);
-    await withTimeout(
-      sendMail({
+    sendMail({
       to: email,
-      html: `<b>Please verify this url to access Locabidz <a href="${process.env.SERVER_URL}/api/v1/auth/verify-email/${verifyToken}">Click here</a></b>`,
-      }),
-      mailTimeoutMs,
-      "Email service timed out. Please try again."
-    );
+      html: `<b>Please verify this url to access Locabidz <a href="${process.env.SERVER_DOMAIN}/api/v1/auth/verify-email/${verifyToken}">Click here</a></b>`,
+    });
     return res.sendResponse({ data: { userId: user.userId, verifyToken } });
   } catch (err) {
     return res.sendError({ message: err });

@@ -15,17 +15,14 @@ async function sendOnboardMail(msg = {}) {
     try {
         let transporter = nodemailer.createTransport({
             host: process.env.MAIL_HOST,
-            port: Number(process.env.MAIL_PORT),
-            secure: Number(process.env.MAIL_PORT) === 465,
+            port: process.env.MAIL_PORT,
+            secure: false, 
             auth: {
                 user: process.env.MAIL_USERNAME, 
                 pass: process.env.MAIL_PASSWORD,
             },
-            connectionTimeout: Number(process.env.MAIL_CONNECTION_TIMEOUT_MS || 10000),
-            greetingTimeout: Number(process.env.MAIL_GREETING_TIMEOUT_MS || 10000),
-            socketTimeout: Number(process.env.MAIL_SOCKET_TIMEOUT_MS || 20000),
         });
-        let info = await transporter.sendMail(msg);
+        let info = await transporter.sendOnboardMail(msg);
 
         console.log("Message sent: %s", info.messageId);
 
