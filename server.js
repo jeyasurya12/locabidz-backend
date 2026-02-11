@@ -15,8 +15,14 @@ const app = express();
 
 app.use(cors())
 
-const port = process.env.SERVER_PORT || 8000
-const server = app.listen(port, () => console.log(`App listening on port ${port}!`));
+// const port = process.env.SERVER_PORT || 8000
+// const server = app.listen(port, () => console.log(`App listening on port ${port}!`));
+const PORT = process.env.PORT || 8000;
+
+const server = app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on port ${PORT}`);
+});
+
 
 // build-in middleware
 app.use(bodyParser.json({limit: '50mb'}));
