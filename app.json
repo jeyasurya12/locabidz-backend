@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "925addb7-bb0f-4bdc-9432-38bf35cf6e20"
+      }
+    },
+    "android": {
+      "package": "com.mjsurya12.storeapi"
+    }
+  }
+}
