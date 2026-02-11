@@ -43,43 +43,43 @@ const signup = async (req, res) => {
         });
       }
     }
-    try {
-      await sendMail({
-        to: email,
-        html: `
-      <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.5;">
-          <h2 style="color: #007BFF;">Verify Your Email</h2>
-          <p>Hello,</p>
-          <p>Thank you for signing up! Please verify your email address to access Locabidz.</p>
-          <p>Click the button below to complete your verification:</p>
-          <a href="${process.env.SERVER_URL}/api/v1/auth/verify-email/${verifyToken}" 
-             style="display: inline-block; padding: 10px 20px; background-color: #007BFF; 
-                    color: #ffffff; text-decoration: none; border-radius: 5px;">
-             Verify Email
-          </a>
-          <p>If the button above does not work, you can also copy and paste the following link into your browser:</p>
-          <p><a href="${process.env.SERVER_URL}/api/v1/auth/verify-email/${verifyToken}">
-              ${process.env.SERVER_URL}/api/v1/auth/verify-email/${verifyToken}
-          </a></p>
-          <p>If you did not request this, please ignore this email.</p>
-          <p>Best regards,<br>Locabidz Team</p>
-      </div>
-  `,
-      });
-    } catch (mailErr) {
-      if (process.env.NODE_ENV !== "production") {
-        console.log(
-          "Signup email failed; continuing in non-production. Verify URL:",
-          `${process.env.SERVER_URL}/api/v1/auth/verify-email/${verifyToken}`
-        );
-      } else {
-        return res.sendError({
-          message:
-            mailErr?.message ||
-            "Failed to send verification email. Please contact support.",
-        });
-      }
-    }
+  //   try {
+  //     await sendMail({
+  //       to: email,
+  //       html: `
+  //     <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.5;">
+  //         <h2 style="color: #007BFF;">Verify Your Email</h2>
+  //         <p>Hello,</p>
+  //         <p>Thank you for signing up! Please verify your email address to access Locabidz.</p>
+  //         <p>Click the button below to complete your verification:</p>
+  //         <a href="${process.env.SERVER_URL}/api/v1/auth/verify-email/${verifyToken}" 
+  //            style="display: inline-block; padding: 10px 20px; background-color: #007BFF; 
+  //                   color: #ffffff; text-decoration: none; border-radius: 5px;">
+  //            Verify Email
+  //         </a>
+  //         <p>If the button above does not work, you can also copy and paste the following link into your browser:</p>
+  //         <p><a href="${process.env.SERVER_URL}/api/v1/auth/verify-email/${verifyToken}">
+  //             ${process.env.SERVER_URL}/api/v1/auth/verify-email/${verifyToken}
+  //         </a></p>
+  //         <p>If you did not request this, please ignore this email.</p>
+  //         <p>Best regards,<br>Locabidz Team</p>
+  //     </div>
+  // `,
+  //     });
+  //   } catch (mailErr) {
+  //     if (process.env.NODE_ENV !== "production") {
+  //       console.log(
+  //         "Signup email failed; continuing in non-production. Verify URL:",
+  //         `${process.env.SERVER_URL}/api/v1/auth/verify-email/${verifyToken}`
+  //       );
+  //     } else {
+  //       return res.sendError({
+  //         message:
+  //           mailErr?.message ||
+  //           "Failed to send verification email. Please contact support.",
+  //       });
+  //     }
+  //   }
     await Log.create({
       log: "log_2",
       user: user._id,
@@ -104,11 +104,11 @@ const login = async (req, res) => {
       return res.sendError({ statusCode: 401, message: "User not found!" });
     if (!user.isActive)
       return res.sendError({ statusCode: 401, message: "User is inactive!" });
-    if (user.verifyToken)
-      return res.sendError({
-        statusCode: 401,
-        message: "Please verify your email to login!",
-      });
+    // if (user.verifyToken)
+    //   return res.sendError({
+    //     statusCode: 401,
+    //     message: "Please verify your email to login!",
+    //   });
 
     // Check for failed login attempts within the last 10 minutes
     const tenMinutesAgo = moment().utc().subtract(10, "minutes").toDate();
