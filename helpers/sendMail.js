@@ -23,6 +23,10 @@ async function sendMail(msg = {}) {
         const port = Number(process.env.MAIL_PORT);
         const secure = port === 465;
 
+        const connectionTimeout = Number(process.env.MAIL_CONNECTION_TIMEOUT_MS || 10000);
+        const greetingTimeout = Number(process.env.MAIL_GREETING_TIMEOUT_MS || 10000);
+        const socketTimeout = Number(process.env.MAIL_SOCKET_TIMEOUT_MS || 20000);
+
         // create reusable transporter object using the default SMTP transport
         let transporter = nodemailer.createTransport({
             host: process.env.MAIL_HOST,
@@ -32,6 +36,9 @@ async function sendMail(msg = {}) {
                 user: process.env.MAIL_USERNAME, // generated ethereal user
                 pass: process.env.MAIL_PASSWORD, // generated ethereal password
             },
+            connectionTimeout,
+            greetingTimeout,
+            socketTimeout,
         });
 
         // send mail with defined transport object
