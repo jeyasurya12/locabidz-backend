@@ -7,6 +7,7 @@ const {
   stripeTransfer,
   getBalance,
 } = require("../lib/libStripe");
+const { createConnectAccount } = require("../lib/libStripe");
 const Contract = require("../model/contract");
 const Fee = require("../model/fee");
 const Log = require("../model/log");
@@ -18,7 +19,77 @@ const User = require("../model/user");
 const createMilestone = async (req, res) => {
   const io = req.app.get("io");
   try {
+    const connectEnabled = process.env.STRIPE_CONNECT_ENABLED === "true";
     const idempotencyKey = req.get("Idempotency-Key");
+
+    let contractorAccount = req.user?.account;
+    if (typeof contractorAccount !== "string" || contractorAccount.trim().length === 0) {
+      if (connectEnabled) {
+        try {
+          const account = await createConnectAccount({ user: req.user });
+          contractorAccount = account?.id;
+          if (typeof contractorAccount === "string" && contractorAccount.trim().length > 0) {
+            await req.user.updateOne({ account: contractorAccount });
+          }
+        } catch (stripeErr) {
+          return res.sendError({
+            message:
+              stripeErr?.message ||
+              "Contractor payout account is not connected. Please connect Stripe account.",
+          });
+        }
+      }
+
+      if (typeof contractorAccount !== "string" || contractorAccount.trim().length === 0) {
+        if (connectEnabled) {
+          return res.sendError({
+            message:
+              "Contractor payout account is not connected. Please connect Stripe account.",
+          });
+        }
+
+        contractorAccount = String(req.user._id);
+      }
+    }
+
+    if (!connectEnabled) {
+      const milestone = await Milestone.create({
+        ...req.body,
+        contractorId: String(req.user._id),
+        workerId: String(req.body.workerId),
+        status: MILESTONE_STATUS.PENDING,
+      });
+
+      await Contract.updateOne(
+        { _id: req.body.contractId },
+        { $addToSet: { milestones: milestone._id } }
+      );
+
+      await Notification.create({
+        notification: "notification_7",
+        user: req.body.workerId,
+        values: {
+          name: milestone.name,
+          userName: req.user.firstName + " " + req.user.lastName,
+        },
+      });
+      io.to(`${req.body.workerId}`).emit("RECEIVE_MESSAGE", {
+        type: "NEW_NOTIFICTION",
+        data: milestone,
+      });
+
+      await Log.create({
+        log: "log_12",
+        user: req.user._id,
+        values: {
+          status: "success",
+          milestoneId: milestone.milestoneId,
+        },
+      });
+
+      return res.sendResponse({ data: milestone });
+    }
+
     const fee = await Fee.findOne({ _id: "createMilestoneFee" });
     const chargeAmount =
       req.body.amount * 100 + req.body.amount * fee.percentage;
@@ -35,11 +106,36 @@ const createMilestone = async (req, res) => {
       return res.sendError({ message: "Insufficiet balance." });
     }
     const worker = await User.findOne({ _id: req.body.workerId });
+    let workerAccount = worker?.account;
+    if (typeof workerAccount !== "string" || workerAccount.trim().length === 0) {
+      if (connectEnabled && worker) {
+        try {
+          const account = await createConnectAccount({ user: worker });
+          workerAccount = account?.id;
+          if (typeof workerAccount === "string" && workerAccount.trim().length > 0) {
+            await worker.updateOne({ account: workerAccount });
+          }
+        } catch (stripeErr) {
+          return res.sendError({
+            message:
+              stripeErr?.message ||
+              "Worker payout account is not connected. Please connect Stripe account.",
+          });
+        }
+      }
+
+      if (typeof workerAccount !== "string" || workerAccount.trim().length === 0) {
+        return res.sendError({
+          message:
+            "Worker payout account is not connected. Please connect Stripe account.",
+        });
+      }
+    }
 
     const milestone = await Milestone.create({
       ...req.body,
-      contractorId: req.user.account,
-      workerId: worker.account,
+      contractorId: contractorAccount,
+      workerId: workerAccount,
       status: MILESTONE_STATUS.PENDING,
     });
 
@@ -107,6 +203,7 @@ const releaseMilestonePayment = async (req, res) => {
   const io = req.app.get("io");
 
   try {
+    const connectEnabled = process.env.STRIPE_CONNECT_ENABLED === "true";
     const idempotencyKey = req.get("Idempotency-Key");
     const milestone = await Milestone.findOne({ _id: req.body.milestoneId });
     if (!milestone) {
@@ -114,6 +211,34 @@ const releaseMilestonePayment = async (req, res) => {
     }
     if (milestone.status === MILESTONE_STATUS.RELEASED) {
       return res.sendError({ message: "Milestone already released." });
+    }
+
+    if (!connectEnabled) {
+      await milestone.updateOne({ status: MILESTONE_STATUS.RELEASED });
+
+      await Notification.create({
+        notification: "notification_8",
+        user: milestone.workerId,
+        values: {
+          name: milestone.name,
+          userName: req.user.firstName + " " + req.user.lastName,
+        },
+      });
+      io.to(`${milestone.workerId}`).emit("RECEIVE_MESSAGE", {
+        type: "NEW_NOTIFICTION",
+        data: milestone,
+      });
+
+      await Log.create({
+        log: "log_13",
+        user: req.user._id,
+        values: {
+          status: "success",
+          milestoneId: milestone.milestoneId,
+        },
+      });
+
+      return res.sendResponse({ data: milestone });
     }
 
     const hasDestination =
@@ -200,8 +325,11 @@ const releaseMilestonePayment = async (req, res) => {
 
 const getMilestones = async (req, res) => {
   try {
+    const connectEnabled = process.env.STRIPE_CONNECT_ENABLED === "true";
     const milestones = await Milestone.find({
-      $or: [{ contractorId: req.user.account }, { workerId: req.user.account }],
+      $or: connectEnabled
+        ? [{ contractorId: req.user.account }, { workerId: req.user.account }]
+        : [{ contractorId: String(req.user._id) }, { workerId: String(req.user._id) }],
       status: MILESTONE_STATUS.PENDING,
     }).sort({ updatedAt: -1 });
     return res.sendResponse({ data: milestones });

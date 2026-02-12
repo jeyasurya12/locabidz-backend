@@ -43,43 +43,48 @@ const signup = async (req, res) => {
         });
       }
     }
-  //   try {
-  //     await sendMail({
-  //       to: email,
-  //       html: `
-  //     <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.5;">
-  //         <h2 style="color: #007BFF;">Verify Your Email</h2>
-  //         <p>Hello,</p>
-  //         <p>Thank you for signing up! Please verify your email address to access Locabidz.</p>
-  //         <p>Click the button below to complete your verification:</p>
-  //         <a href="${process.env.SERVER_URL}/api/v1/auth/verify-email/${verifyToken}" 
-  //            style="display: inline-block; padding: 10px 20px; background-color: #007BFF; 
-  //                   color: #ffffff; text-decoration: none; border-radius: 5px;">
-  //            Verify Email
-  //         </a>
-  //         <p>If the button above does not work, you can also copy and paste the following link into your browser:</p>
-  //         <p><a href="${process.env.SERVER_URL}/api/v1/auth/verify-email/${verifyToken}">
-  //             ${process.env.SERVER_URL}/api/v1/auth/verify-email/${verifyToken}
-  //         </a></p>
-  //         <p>If you did not request this, please ignore this email.</p>
-  //         <p>Best regards,<br>Locabidz Team</p>
-  //     </div>
-  // `,
-  //     });
-  //   } catch (mailErr) {
-  //     if (process.env.NODE_ENV !== "production") {
-  //       console.log(
-  //         "Signup email failed; continuing in non-production. Verify URL:",
-  //         `${process.env.SERVER_URL}/api/v1/auth/verify-email/${verifyToken}`
-  //       );
-  //     } else {
-  //       return res.sendError({
-  //         message:
-  //           mailErr?.message ||
-  //           "Failed to send verification email. Please contact support.",
-  //       });
-  //     }
-  //   }
+
+    try {
+      const serverBaseUrl = process.env.SERVER_URL || process.env.SERVER_DOMAIN;
+      if (!serverBaseUrl) {
+        return res.sendError({
+          statusCode: 500,
+          message:
+            "SERVER_URL (or SERVER_DOMAIN) is not configured. Unable to send verification email.",
+        });
+      }
+
+      const verifyUrl = `${serverBaseUrl}/api/v1/auth/verify-email/${verifyToken}`;
+
+      await sendMail({
+        to: email,
+        subject: "Verify Your Email",
+        html: `
+      <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.5;">
+          <h2 style="color: #007BFF;">Verify Your Email</h2>
+          <p>Hello,</p>
+          <p>Thank you for signing up! Please verify your email address to access Locabidz.</p>
+          <p>Click the button below to complete your verification:</p>
+          <a href="${verifyUrl}" 
+             style="display: inline-block; padding: 10px 20px; background-color: #007BFF; 
+                    color: #ffffff; text-decoration: none; border-radius: 5px;">
+             Verify Email
+          </a>
+          <p>If the button above does not work, you can also copy and paste the following link into your browser:</p>
+          <p><a href="${verifyUrl}">${verifyUrl}</a></p>
+          <p>If you did not request this, please ignore this email.</p>
+          <p>Best regards,<br>Locabidz Team</p>
+      </div>
+  `,
+      });
+    } catch (mailErr) {
+      return res.sendError({
+        message:
+          mailErr?.message ||
+          "Failed to send verification email. Please contact support.",
+        statusCode: 500,
+      });
+    }
     await Log.create({
       log: "log_2",
       user: user._id,
@@ -225,13 +230,23 @@ const resendEmail = async (req, res) => {
       verifyToken,
       verifyTokenCreatedAt: moment().utc(),
     });
-    sendMail({
+    const serverBaseUrl = process.env.SERVER_URL || process.env.SERVER_DOMAIN;
+    if (!serverBaseUrl) {
+      return res.sendError({
+        statusCode: 500,
+        message:
+          "SERVER_URL (or SERVER_DOMAIN) is not configured. Unable to send verification email.",
+      });
+    }
+    const verifyUrl = `${serverBaseUrl}/api/v1/auth/verify-email/${verifyToken}`;
+    await sendMail({
       to: email,
-      html: `<b>Please verify this url to access Locabidz <a href="${process.env.SERVER_DOMAIN}/api/v1/auth/verify-email/${verifyToken}">Click here</a></b>`,
+      subject: "Verify Your Email",
+      html: `<b>Please verify this url to access Locabidz <a href="${verifyUrl}">Click here</a></b>`,
     });
     return res.sendResponse({ data: { userId: user.userId, verifyToken } });
   } catch (err) {
-    return res.sendError({ message: err });
+    return res.sendError({ message: err?.message || err, statusCode: 500 });
   }
 };
 
@@ -264,7 +279,7 @@ const forgotPassword = async (req, res) => {
     });
 
     // Send the email with the token
-    sendMail({
+    await sendMail({
       to: user.email,
       subject: "Your One-Time Password (OTP) for Password Reset",
       html: `
@@ -286,7 +301,7 @@ const forgotPassword = async (req, res) => {
       },
     });
   } catch (err) {
-    return res.sendError({ message: err });
+    return res.sendError({ message: err?.message || err, statusCode: 500 });
   }
 };
 
@@ -339,7 +354,7 @@ const updatePassword = async (req, res) => {
       forgotPasswordTokenCreatedAt: null,
       password: hash,
     });
-    sendMail({
+    await sendMail({
       to: user.email,
       html: `<b>Your password has been updated successfully</b>`,
     });
@@ -355,7 +370,7 @@ const updatePassword = async (req, res) => {
       message: "Your password has been updated successfully",
     });
   } catch (err) {
-    return res.sendError({ message: err });
+    return res.sendError({ message: err?.message || err, statusCode: 500 });
   }
 };
 

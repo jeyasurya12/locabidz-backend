@@ -52,6 +52,7 @@ const createAttachment = async (req, res) => {
     return res.sendResponse({
       data: {
         attachment_id: attachment._id,
+        filename: attachment.filename,
       },
     });
   } catch (err) {

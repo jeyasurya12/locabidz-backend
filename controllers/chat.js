@@ -119,7 +119,10 @@ const messageCreate = async ({
     $addToSet: {
       messages: message._id,
     },
-    lastMessageId: message._id,
+    $set: {
+      lastMessageId: message._id,
+      updatedAt: new Date(),
+    },
   });
   let newMessage = await Message.findOne({
     _id: message._id,
@@ -181,7 +184,7 @@ const getMessages = async (req, res) => {
       .populate({
         path: "messages",
         options: {
-          sort: { createdAt: -1 },
+          sort: { createdAt: 1 },
           skip,
           limit,
         },

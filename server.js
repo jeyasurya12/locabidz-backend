@@ -13,6 +13,8 @@ const path = require('path');
 const { applySecurityMiddleware } = require("./middlewares/security");
 const errorHandler = require("./middlewares/errorHandler");
 const { httpLogger } = require("./utils/logger");
+const sendMail = require("./helpers/sendMail");
+const { logger } = require("./utils/logger");
 
 const app = express();
 
@@ -92,6 +94,40 @@ fs.mkdir(folderName, { recursive: true }, (err) => {
 
 const start = async () => {
     try {
+        const isProd = process.env.NODE_ENV === "production";
+        const mailRequired = process.env.MAIL_REQUIRED === "true";
+        const mailConfigured =
+          typeof sendMail.isMailConfigured === "function" &&
+          sendMail.isMailConfigured();
+
+        if (!mailConfigured) {
+          const logFn = isProd ? logger.error.bind(logger) : logger.warn.bind(logger);
+          logFn(
+            {
+              mailUrlConfigured: Boolean(process.env.MAIL_URL),
+              mailHost: process.env.MAIL_HOST,
+              mailPort: process.env.MAIL_PORT,
+              mailUserConfigured: Boolean(process.env.MAIL_USERNAME),
+              mailPassConfigured: Boolean(process.env.MAIL_PASSWORD),
+              mailRequired,
+            },
+            "email_not_configured"
+          );
+
+          if (mailRequired) {
+            throw new Error(
+              "Email is required but not configured. Please set MAIL_URL (recommended) or MAIL_HOST/MAIL_PORT/MAIL_USERNAME/MAIL_PASSWORD."
+            );
+          }
+        } else if (typeof sendMail.init === "function") {
+          try {
+            await sendMail.init();
+          } catch (mailInitErr) {
+            logger.error({ err: mailInitErr, mailRequired }, "email_init_failed");
+            if (mailRequired) throw mailInitErr;
+          }
+        }
+
         await connectDB(process.env.MONGO_URI);
         await insertSeeds();
     } catch (err) {
