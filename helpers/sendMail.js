@@ -21,20 +21,23 @@ function getTransporter() {
 
     // const port = Number(process.env.MAIL_PORT);
     // const secure = port === 465;
+
+    const port = 587; // Gmail STARTTLS port
+    const secure = false;
     const key = `${process.env.MAIL_HOST}|${port}|${secure}|${process.env.MAIL_USERNAME}`;
     if (cachedTransporter && cachedTransportKey === key) return cachedTransporter;
 
     cachedTransportKey = key;
     cachedTransporter = nodemailer.createTransport({
-         host: 'smtp.gmail.com',
-       port: 587,
-        secure: false,
+        host: 'smtp.gmail.com',
+        port,
+        secure,
         requireTLS: true,
         auth: {
             user: process.env.MAIL_USERNAME,
             pass: process.env.MAIL_PASSWORD,
         },
-         tls: {
+        tls: {
             rejectUnauthorized: false,
         },
         connectionTimeout: Number(process.env.MAIL_CONNECTION_TIMEOUT_MS || 10000),
@@ -47,7 +50,7 @@ function getTransporter() {
 
 // async..await is not allowed in global scope, must use a wrapper
 async function sendMail(msg = {}) {
-    msg = {...defaultValue, ...msg}
+    msg = { ...defaultValue, ...msg }
     if (!msg.to) return;
     try {
         const transporter = getTransporter();
