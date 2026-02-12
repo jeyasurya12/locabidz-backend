@@ -110,6 +110,11 @@ const getPosts = async (req, res) => {
   try {
     let query = { isActive: true };
 
+    const page = Math.max(1, Number(req.query.page || 1));
+    const rawLimit = Number(req.query.limit || 20);
+    const limit = Math.min(100, Math.max(1, rawLimit));
+    const skip = (page - 1) * limit;
+
     if (req.query.jobType) {
       const jobTypes = Array.isArray(req.query.jobType)
         ? req.query.jobType
@@ -155,7 +160,9 @@ const getPosts = async (req, res) => {
       .populate({
         path: "attachments",
       })
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
     return res.sendResponse({
       data: posts,
     });
@@ -166,6 +173,11 @@ const getPosts = async (req, res) => {
 
 const getMyPosts = async (req, res) => {
   try {
+    const page = Math.max(1, Number(req.query.page || 1));
+    const rawLimit = Number(req.query.limit || 20);
+    const limit = Math.min(100, Math.max(1, rawLimit));
+    const skip = (page - 1) * limit;
+
     const posts = await Post.find({ postedBy: req.user._id, isActive: true })
       .populate({
         path: "postedBy",
@@ -194,7 +206,9 @@ const getMyPosts = async (req, res) => {
       .populate({
         path: "attachments",
       })
-      .sort({ updatedAt: -1 });
+      .sort({ updatedAt: -1 })
+      .skip(skip)
+      .limit(limit);
     return res.sendResponse({
       data: posts,
     });

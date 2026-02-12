@@ -2,6 +2,17 @@ const { updateConnectAccount } = require("../lib/libStripe");
 const Log = require("../model/log");
 const User = require("../model/user");
 
+const pick = (obj, keys) => {
+  const out = {};
+  if (!obj || typeof obj !== "object") return out;
+  keys.forEach((k) => {
+    if (Object.prototype.hasOwnProperty.call(obj, k)) {
+      out[k] = obj[k];
+    }
+  });
+  return out;
+};
+
 const getPublicProfile = async (req, res) => {
   try {
     const user = await User.findOne({ _id: req.params.userId })
@@ -119,9 +130,17 @@ const getProfile = async (req, res) => {
 
 const workerProfile = async (req, res) => {
   try {
+    const safeUpdate = pick(req.body, [
+      "firstName",
+      "lastName",
+      "profilePicture",
+      "worker",
+      "bankAccount",
+      "location",
+    ]);
     const user = await User.updateOne(
       { _id: req.user._id },
-      { ...req.body, isUpdated: true }
+      { ...safeUpdate, isUpdated: true }
     );
 
     await Log.create({
@@ -159,9 +178,18 @@ const contractorProfile = async (req, res) => {
     if (userExits) {
       return res.sendError({ message: "Tradename already exits." });
     }
+
+    const safeUpdate = pick(req.body, [
+      "firstName",
+      "lastName",
+      "profilePicture",
+      "contractor",
+      "bankAccount",
+      "location",
+    ]);
     const user = await User.updateOne(
       { _id: req.user._id },
-      { ...req.body, isUpdated: true }
+      { ...safeUpdate, isUpdated: true }
     );
     await Log.create({
       log: "log_4",
@@ -190,7 +218,10 @@ const contractorProfile = async (req, res) => {
 
 const updateUserRole = async (req, res) => {
   try {
-    const user = await User.updateOne({ _id: req.user._id }, { ...req.body });
+    const user = await User.updateOne(
+      { _id: req.user._id },
+      { role: req.body.role }
+    );
     await Log.create({
       log: "log_5",
       user: req.user._id,

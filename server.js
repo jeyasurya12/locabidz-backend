@@ -1,6 +1,6 @@
 require('dotenv').config();
+require("express-async-errors");
 const express = require('express');
-var cors = require('cors')
 const bodyParser = require("body-parser");
 const connectDB = require('./db/connect')
 const parseResponse = require('./middlewares/parseResponse');
@@ -10,10 +10,16 @@ const { errors } = require('celebrate');
 const registerSockets = require('./sockets/index');
 const insertSeeds = require('./seeds');
 const path = require('path');
+const { applySecurityMiddleware } = require("./middlewares/security");
+const errorHandler = require("./middlewares/errorHandler");
+const { httpLogger } = require("./utils/logger");
 
 const app = express();
 
-app.use(cors())
+applySecurityMiddleware(app);
+
+// Stripe webhooks require the raw request body and must be registered BEFORE any JSON body parsing middleware.
+require("./routes/stripe")(app);
 
 // const port = process.env.SERVER_PORT || 8000
 // const server = app.listen(port, () => console.log(`App listening on port ${port}!`));
@@ -35,6 +41,7 @@ app.set('io', io)
 app.set("view engine", "ejs");
 app.set("views", path.join(__dirname, "views"));
 app.use(parseResponse)
+app.use(httpLogger)
 app.use('/public', express.static('public'))
 
 app.get('/health', (req, res) => {
@@ -73,6 +80,8 @@ app.use('*', (req, res) => {
 });
 
 app.use(errors());
+
+app.use(errorHandler);
 
 const folderName = "public/uploads";
 fs.mkdir(folderName, { recursive: true }, (err) => {

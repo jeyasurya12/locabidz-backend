@@ -6,12 +6,14 @@ const {
   getMilestones
 } = require("../controllers/milestone");
 const validateJwtToken = require("../middlewares/auth");
+const requireRole = require("../middlewares/requireRole");
 const { celebrate, Joi, Segments } = require("celebrate");
 
 module.exports = (app) => {
   router.post(
     "/",
     validateJwtToken,
+    requireRole(["contractor"]),
     celebrate({
       [Segments.BODY]: Joi.object().keys({
         name: Joi.string().required(),
@@ -28,6 +30,7 @@ module.exports = (app) => {
   router.post(
     "/release",
     validateJwtToken,
+    requireRole(["contractor"]),
     celebrate({
       [Segments.BODY]: Joi.object().keys({
         milestoneId: Joi.string().required(),

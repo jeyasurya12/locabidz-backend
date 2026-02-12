@@ -47,6 +47,7 @@ const createMilestone = async ({
       currency: "usd",
       source: milestone.contractorId,
       transfer_group: `group_${milestone.contractorId}`,
+      idempotencyKey: `milestone:${milestone._id}:charge`,
     });
 
     const contract = await Contract.findOne({ _id: contractId });

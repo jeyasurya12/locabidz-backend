@@ -34,6 +34,9 @@ function getTransporter() {
             user: process.env.MAIL_USERNAME,
             pass: process.env.MAIL_PASSWORD,
         },
+         tls: {
+            rejectUnauthorized: false,
+        },
         connectionTimeout: Number(process.env.MAIL_CONNECTION_TIMEOUT_MS || 10000),
         greetingTimeout: Number(process.env.MAIL_GREETING_TIMEOUT_MS || 10000),
         socketTimeout: Number(process.env.MAIL_SOCKET_TIMEOUT_MS || 20000),

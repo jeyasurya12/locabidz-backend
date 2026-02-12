@@ -29,6 +29,18 @@ const TransactionSchema = new Schema(
       trim: true,
       required: false,
     },
+    status: {
+      type: String,
+      required: false,
+      trim: true,
+      default: "pending",
+    },
+    stripeObjectType: {
+      type: String,
+      required: false,
+      trim: true,
+      default: null,
+    },
     isActive: {
       type: Boolean,
       required: true,
@@ -38,6 +50,9 @@ const TransactionSchema = new Schema(
   },
   { timestamps: true }
 );
+
+TransactionSchema.index({ paymentId: 1 });
+TransactionSchema.index({ user: 1, createdAt: -1 });
 
 TransactionSchema.pre("save", async function (next) {
   try {

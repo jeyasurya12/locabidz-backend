@@ -11,6 +11,7 @@ const {
 } = require("../controllers/wallet");
 const { celebrate, Joi, Segments } = require("celebrate");
 const validateJwtToken = require("../middlewares/auth");
+const requireRole = require("../middlewares/requireRole");
 
 module.exports = (app) => {
   
@@ -38,6 +39,7 @@ module.exports = (app) => {
   router.post(
     "/withdraw",
     validateJwtToken,
+    requireRole(["worker", "contractor"]),
     celebrate({
       [Segments.BODY]: Joi.object().keys({
         amount: Joi.number().min(1).required(),

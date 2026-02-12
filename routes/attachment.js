@@ -6,29 +6,23 @@ const {
 } = require("../controllers/attachment");
 
 const { celebrate, Joi, errors, Segments } = require("celebrate");
-const path = require("path");
-const crypto = require("crypto");
-
-const multer = require("multer");
 const auth = require("../middlewares/auth");
-const upload = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => {
-      cb(null, path.join(__dirname, "../public/uploads/"));
-    },
-    filename: (req, file, cb) => {
-      // randomBytes function will generate a random name
-      let customFileName = crypto.randomBytes(18).toString("hex");
-      // get file extension from original file name
-      let fileExtension = path.extname(file.originalname).split(".")[1];
-      cb(null, customFileName + "." + fileExtension);
-    },
-  }),
-});
 
 module.exports = (app) => {
 
-  router.post("/single/upload", createAttachment);
+  router.post(
+    "/single/upload",
+    auth,
+    celebrate({
+      [Segments.BODY]: Joi.object().keys({
+        file: Joi.string().required(),
+        name: Joi.string().required(),
+        type: Joi.string().required(),
+        size: Joi.number().min(1).required(),
+      }),
+    }),
+    createAttachment
+  );
   
   router.get(
     "/get/:attachmentId",

@@ -3,36 +3,39 @@ const AdminUser = require("../model/adminUser");
 
 // const PersonType = db.PersonType
 
-module.exports = function (req, res, next) {
+module.exports = async function (req, res, next) {
   try {
     const accessToken =
       req.headers.authorization && req.headers.authorization.split(" ")[1];
-    if (!accessToken)
+    if (!accessToken) {
       return res.sendError({
-        success: false,
         message: "Access denied. Please login!",
         statusCode: 401,
       });
+    }
+
     const decoded = jwtVerify(accessToken);
-    AdminUser.findOne({ accessToken })
-      .then((user) => {
-        if (!user)
-          return res.sendError({
-            message: "The user does not exist or session is expired!",
-            statusCode: 401,
-          });
-        req.user = user;
-        next();
-      })
-      .catch((err) => {
-        return res.status(404).sendError({
-          message: err.message || "The user does not exist",
-          statusCode: 401,
-        });
+    if (!decoded) {
+      return res.sendError({
+        message: "Invalid token",
+        statusCode: 401,
       });
+    }
+
+    const user = await AdminUser.findOne({ accessToken });
+    if (!user) {
+      return res.sendError({
+        message: "The user does not exist or session is expired!",
+        statusCode: 401,
+      });
+    }
+
+    req.user = user;
+    return next();
   } catch (err) {
-    return res
-      .status(400)
-      .sendError({ message: err.message || "Invalid token", statusCode: 401 });
+    return res.sendError({
+      message: err.message || "Invalid token",
+      statusCode: 401,
+    });
   }
 };

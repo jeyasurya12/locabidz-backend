@@ -161,6 +161,11 @@ const createMessage = async (req, res) => {
 
 const getMessages = async (req, res) => {
   try {
+    const page = Math.max(1, Number(req.query.page || 1));
+    const rawLimit = Number(req.query.limit || 50);
+    const limit = Math.min(200, Math.max(1, rawLimit));
+    const skip = (page - 1) * limit;
+
     let chat = await Chat.findOne({
       chatId: req.params.receiverChatId,
     })
@@ -175,6 +180,11 @@ const getMessages = async (req, res) => {
       })
       .populate({
         path: "messages",
+        options: {
+          sort: { createdAt: -1 },
+          skip,
+          limit,
+        },
         populate: [
           {
             path: "senderId",
@@ -199,6 +209,11 @@ const getMessages = async (req, res) => {
 
 const getChats = async (req, res) => {
   try {
+    const page = Math.max(1, Number(req.query.page || 1));
+    const rawLimit = Number(req.query.limit || 50);
+    const limit = Math.min(200, Math.max(1, rawLimit));
+    const skip = (page - 1) * limit;
+
     let chats = await Chat.find({ members: { $in: req.user._id } })
       .populate({
         path: "members",
@@ -221,7 +236,9 @@ const getChats = async (req, res) => {
       .populate({
         path: "attachments",
       })
-      .sort({ updatedAt: -1 });
+      .sort({ updatedAt: -1 })
+      .skip(skip)
+      .limit(limit);
     return res.sendResponse({
       data: chats.reduce((acc, cv) => {
         acc.push({

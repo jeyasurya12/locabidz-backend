@@ -74,6 +74,10 @@ const PostSchema = new Schema(
   { timestamps: true }
 );
 
+PostSchema.index({ isActive: 1, createdAt: -1 });
+PostSchema.index({ postedBy: 1, isActive: 1, updatedAt: -1 });
+PostSchema.index({ jobType: 1, experienceLevel: 1, isActive: 1, createdAt: -1 });
+
 PostSchema.pre("save", async function (next) {
   try {
     const post = this;

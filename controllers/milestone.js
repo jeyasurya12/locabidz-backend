@@ -18,6 +18,7 @@ const User = require("../model/user");
 const createMilestone = async (req, res) => {
   const io = req.app.get("io");
   try {
+    const idempotencyKey = req.get("Idempotency-Key");
     const fee = await Fee.findOne({ _id: "createMilestoneFee" });
     const chargeAmount =
       req.body.amount * 100 + req.body.amount * fee.percentage;
@@ -47,6 +48,7 @@ const createMilestone = async (req, res) => {
       currency: "usd",
       source: milestone.contractorId,
       transfer_group: `group_${milestone.contractorId}`,
+      idempotencyKey: idempotencyKey || undefined,
     });
 
     const contract = await Contract.findOne({
@@ -105,7 +107,23 @@ const releaseMilestonePayment = async (req, res) => {
   const io = req.app.get("io");
 
   try {
+    const idempotencyKey = req.get("Idempotency-Key");
     const milestone = await Milestone.findOne({ _id: req.body.milestoneId });
+    if (!milestone) {
+      return res.sendError({ message: "Milestone not found." });
+    }
+    if (milestone.status === MILESTONE_STATUS.RELEASED) {
+      return res.sendError({ message: "Milestone already released." });
+    }
+
+    const hasDestination =
+      typeof milestone.workerId === "string" &&
+      milestone.workerId.trim().length > 0;
+    if (!hasDestination) {
+      return res.sendError({
+        message: "Worker payout account is not connected. Please connect Stripe account.",
+      });
+    }
     const fee = await Fee.findOne({ _id: "releaseMilestoneFee" });
 
     const transferAmount =
@@ -116,6 +134,7 @@ const releaseMilestonePayment = async (req, res) => {
       destination: milestone.workerId,
       source: milestone.paymentId,
       transfer_group: `group_${milestone.contractorId}`,
+      idempotencyKey: idempotencyKey || undefined,
     });
 
     const user = await User.findOne({

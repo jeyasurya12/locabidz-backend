@@ -5,11 +5,18 @@ const Proposal = require("../model/proposal");
 
 const getMyProposals = async (req, res) => {
   try {
+    const page = Math.max(1, Number(req.query.page || 1));
+    const rawLimit = Number(req.query.limit || 20);
+    const limit = Math.min(100, Math.max(1, rawLimit));
+    const skip = (page - 1) * limit;
+
     let proposals = await Proposal.find({ proposedBy: req.user._id })
       .populate({
         path: "postId",
       })
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
     return res.sendResponse({
       data: proposals,
     });

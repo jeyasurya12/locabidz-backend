@@ -22,7 +22,7 @@ async function sendOnboardMail(msg = {}) {
                 pass: process.env.MAIL_PASSWORD,
             },
         });
-        let info = await transporter.sendOnboardMail(msg);
+        let info = await transporter.sendMail(msg);
 
         console.log("Message sent: %s", info.messageId);
 

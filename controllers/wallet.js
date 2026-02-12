@@ -39,9 +39,15 @@ const getWalletAccount = async (req, res) => {
 
 const addAmountToWallet = async (req, res) => {
   try {
+    const idempotencyKey = req.get("Idempotency-Key");
     const payment = await createPaymentIntent({
       account: req.user.account,
       amount: req.body.amount,
+      idempotencyKey: idempotencyKey || undefined,
+      metadata: {
+        userId: String(req.user._id),
+        method: "ADD_AMOUNT",
+      },
     });
    
     return res.sendResponse({ data: { clientSecret: payment.client_secret } });
@@ -52,20 +58,38 @@ const addAmountToWallet = async (req, res) => {
 
 const withdrawAmount = async (req, res) => {
   try {
+    const idempotencyKey = req.get("Idempotency-Key");
     const fee = await Fee.findOne({ _id: "amountWithdrawFee" });
-    const chargeAmount =
-      req.body.amount - req.body.amount * (fee.percentage / 100);
+    if (!fee || typeof fee.percentage !== "number") {
+      return res.sendError({ message: "Withdraw fee is not configured" });
+    }
+
+    // Work in cents (integers) only. Stripe requires integer `amount`.
+    const requestedAmount = Number(req.body.amount);
+    if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
+      return res.sendError({ message: "Invalid amount" });
+    }
+
+    const feeAmount = Math.round(requestedAmount * (fee.percentage / 100));
+    const chargeAmount = Math.round(requestedAmount - feeAmount);
+
+    if (chargeAmount < 1) {
+      return res.sendError({ message: "Amount is too small after fees" });
+    }
 
     const payment = await createPayout({
       account: req.user.account,
       amount: chargeAmount,
-      fee: req.body.amount * (fee.percentage / 100),
+      fee: feeAmount,
+      idempotencyKey: idempotencyKey || undefined,
     });
     await Transaction.create({
       paymentId: payment.id,
-      amount: req.body.amount / 100,
-      feeAmount: (req.body.amount / 100) * (fee.percentage / 100),
+      amount: requestedAmount / 100,
+      feeAmount: feeAmount / 100,
       method: TRANSACTION_METHODS.WITHDRAW_AMOUNT,
+      status: "pending",
+      stripeObjectType: "payout",
       user: req.user._id,
     });
     return res.sendResponse({ data: { payment } });

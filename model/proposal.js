@@ -34,6 +34,10 @@ const ProposalSchema = new Schema(
   { timestamps: true }
 );
 
+ProposalSchema.index({ proposalId: 1 }, { unique: true });
+ProposalSchema.index({ proposedBy: 1, createdAt: -1 });
+ProposalSchema.index({ postId: 1, proposedBy: 1 }, { unique: true });
+
 ProposalSchema.pre("save", async function (next) {
   try {
     const proposal = this;

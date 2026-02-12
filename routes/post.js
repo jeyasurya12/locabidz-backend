@@ -19,6 +19,8 @@ module.exports = (app) => {
       jobType: Joi.string().optional(),
       experienceLevel: Joi.string().optional(),
       contractorId: Joi.string().optional(),
+      page: Joi.number().optional(),
+      limit: Joi.number().optional(),
     }),
   }), getPosts);
 
