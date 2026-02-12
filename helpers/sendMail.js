@@ -19,17 +19,17 @@ function getTransporter() {
         );
     }
 
-    const port = Number(process.env.MAIL_PORT);
-    const secure = port === 465;
+    // const port = Number(process.env.MAIL_PORT);
+    // const secure = port === 465;
     const key = `${process.env.MAIL_HOST}|${port}|${secure}|${process.env.MAIL_USERNAME}`;
     if (cachedTransporter && cachedTransportKey === key) return cachedTransporter;
 
     cachedTransportKey = key;
     cachedTransporter = nodemailer.createTransport({
-        host: process.env.MAIL_HOST,
-        port,
-        secure,
-        requireTLS: !secure,
+         host: 'smtp.gmail.com',
+       port: 587,
+        secure: false,
+        requireTLS: true,
         auth: {
             user: process.env.MAIL_USERNAME,
             pass: process.env.MAIL_PASSWORD,
