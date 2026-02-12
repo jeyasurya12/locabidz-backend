@@ -22,8 +22,8 @@ function getTransporter() {
     // const port = Number(process.env.MAIL_PORT);
     // const secure = port === 465;
 
-    const port = 587; // Gmail STARTTLS port
-    const secure = false;
+    const port = 465; // Gmail STARTTLS port
+    const secure = true;
     const key = `${process.env.MAIL_HOST}|${port}|${secure}|${process.env.MAIL_USERNAME}`;
     if (cachedTransporter && cachedTransportKey === key) return cachedTransporter;
 
@@ -32,7 +32,7 @@ function getTransporter() {
         host: 'smtp.gmail.com',
         port,
         secure,
-        requireTLS: true,
+        requireTLS: false,
         auth: {
             user: process.env.MAIL_USERNAME,
             pass: process.env.MAIL_PASSWORD,
