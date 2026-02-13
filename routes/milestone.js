@@ -20,6 +20,8 @@ module.exports = (app) => {
         amount: Joi.number().required(),
         dueDate: Joi.string().required(),
         description: Joi.string().required(),
+        link: Joi.string().allow("", null).optional(),
+        paymentSource: Joi.string().allow("", null).optional(),
         contractId: Joi.string().required(),
         workerId: Joi.string().required(),
       }),

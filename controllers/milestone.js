@@ -7,7 +7,6 @@ const {
   stripeTransfer,
   getBalance,
 } = require("../lib/libStripe");
-const { createConnectAccount } = require("../lib/libStripe");
 const Contract = require("../model/contract");
 const Fee = require("../model/fee");
 const Log = require("../model/log");
@@ -16,38 +15,71 @@ const Notification = require("../model/notification");
 const Transaction = require("../model/transaction");
 const User = require("../model/user");
 
+const getStripeErrorMessage = (err) => {
+  if (!err) return "An error occurred";
+  const rawMessage = err?.raw?.message;
+  const rawParam = err?.raw?.param;
+  if (typeof rawMessage === "string" && rawMessage.trim().length > 0) {
+    return typeof rawParam === "string" && rawParam.trim().length > 0
+      ? `${rawMessage} (param: ${rawParam})`
+      : rawMessage;
+  }
+  if (typeof err.message === "string" && err.message.trim().length > 0) {
+    return err.message;
+  }
+  return "An error occurred";
+};
+
+const assertStripeConnectOnboarded = (user, roleLabel) => {
+  const accountId = user?.account;
+  if (typeof accountId !== "string" || accountId.trim().length === 0) {
+    const err = new Error(
+      `${roleLabel} payout account is not connected. Please connect Stripe account.`
+    );
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const onboardingComplete = user?.stripeOnboardingComplete === true;
+  if (!onboardingComplete) {
+    const err = new Error(
+      `${roleLabel} Stripe onboarding is not completed. Please complete Stripe onboarding.`
+    );
+    err.statusCode = 403;
+    throw err;
+  }
+
+  return accountId.trim();
+};
+
 const createMilestone = async (req, res) => {
   const io = req.app.get("io");
   try {
     const connectEnabled = process.env.STRIPE_CONNECT_ENABLED === "true";
     const idempotencyKey = req.get("Idempotency-Key");
 
-    let contractorAccount = req.user?.account;
-    if (typeof contractorAccount !== "string" || contractorAccount.trim().length === 0) {
-      if (connectEnabled) {
-        try {
-          const account = await createConnectAccount({ user: req.user });
-          contractorAccount = account?.id;
-          if (typeof contractorAccount === "string" && contractorAccount.trim().length > 0) {
-            await req.user.updateOne({ account: contractorAccount });
-          }
-        } catch (stripeErr) {
-          return res.sendError({
-            message:
-              stripeErr?.message ||
-              "Contractor payout account is not connected. Please connect Stripe account.",
-          });
+    const stripeKey = process.env.STRIPE_SECRET_KEY;
+    const isTestMode = typeof stripeKey === "string" && stripeKey.startsWith("sk_test_");
+    const isLiveMode = typeof stripeKey === "string" && stripeKey.startsWith("sk_live_");
+
+    const rawLink = req.body?.link;
+    const link = typeof rawLink === "string" && rawLink.trim().length === 0 ? null : rawLink;
+    if (typeof link === "string") {
+      try {
+        const parsed = new URL(link);
+        if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+          return res.sendError({ message: "Invalid link URL" });
         }
+      } catch {
+        return res.sendError({ message: "Invalid link URL" });
       }
+    }
 
+    let contractorAccount = req.user?.account;
+    if (connectEnabled) {
+      contractorAccount = assertStripeConnectOnboarded(req.user, "Contractor");
+    } else {
       if (typeof contractorAccount !== "string" || contractorAccount.trim().length === 0) {
-        if (connectEnabled) {
-          return res.sendError({
-            message:
-              "Contractor payout account is not connected. Please connect Stripe account.",
-          });
-        }
-
         contractorAccount = String(req.user._id);
       }
     }
@@ -55,6 +87,7 @@ const createMilestone = async (req, res) => {
     if (!connectEnabled) {
       const milestone = await Milestone.create({
         ...req.body,
+        link,
         contractorId: String(req.user._id),
         workerId: String(req.body.workerId),
         status: MILESTONE_STATUS.PENDING,
@@ -106,43 +139,52 @@ const createMilestone = async (req, res) => {
       return res.sendError({ message: "Insufficiet balance." });
     }
     const worker = await User.findOne({ _id: req.body.workerId });
-    let workerAccount = worker?.account;
-    if (typeof workerAccount !== "string" || workerAccount.trim().length === 0) {
-      if (connectEnabled && worker) {
-        try {
-          const account = await createConnectAccount({ user: worker });
-          workerAccount = account?.id;
-          if (typeof workerAccount === "string" && workerAccount.trim().length > 0) {
-            await worker.updateOne({ account: workerAccount });
-          }
-        } catch (stripeErr) {
-          return res.sendError({
-            message:
-              stripeErr?.message ||
-              "Worker payout account is not connected. Please connect Stripe account.",
-          });
-        }
-      }
+    if (!worker) {
+      return res.sendError({ message: "Worker not found." });
+    }
 
+    let workerAccount = worker?.account;
+    if (connectEnabled) {
+      try {
+        workerAccount = assertStripeConnectOnboarded(worker, "Worker");
+      } catch (stripeErr) {
+        return res.sendError({ message: getStripeErrorMessage(stripeErr) });
+      }
+    } else {
       if (typeof workerAccount !== "string" || workerAccount.trim().length === 0) {
-        return res.sendError({
-          message:
-            "Worker payout account is not connected. Please connect Stripe account.",
-        });
+        workerAccount = String(worker._id);
       }
     }
 
     const milestone = await Milestone.create({
       ...req.body,
+      link,
       contractorId: contractorAccount,
       workerId: workerAccount,
       status: MILESTONE_STATUS.PENDING,
     });
 
+    const paymentSource = isTestMode
+      ? "tok_visa"
+      : typeof req.body.paymentSource === "string" && req.body.paymentSource.trim().length > 0
+        ? req.body.paymentSource.trim()
+        : null;
+
+    if (!paymentSource && isLiveMode) {
+      return res.sendError({
+        message:
+          "paymentSource is required in live mode (card token/payment method id).",
+      });
+    }
+
+    if (!paymentSource && !isTestMode) {
+      return res.sendError({ message: "Unable to determine payment source" });
+    }
+
     const charge = await stripeCreateCharge({
       amount: chargeAmount,
       currency: "usd",
-      source: milestone.contractorId,
+      source: paymentSource,
       transfer_group: `group_${milestone.contractorId}`,
       idempotencyKey: idempotencyKey || undefined,
     });
@@ -195,7 +237,7 @@ const createMilestone = async (req, res) => {
         status: "failed",
       },
     });
-    return res.sendError({ message: err.message });
+    return res.sendError({ message: getStripeErrorMessage(err) });
   }
 };
 
@@ -205,6 +247,13 @@ const releaseMilestonePayment = async (req, res) => {
   try {
     const connectEnabled = process.env.STRIPE_CONNECT_ENABLED === "true";
     const idempotencyKey = req.get("Idempotency-Key");
+    if (connectEnabled) {
+      try {
+        assertStripeConnectOnboarded(req.user, "Contractor");
+      } catch (stripeErr) {
+        return res.sendError({ message: getStripeErrorMessage(stripeErr) });
+      }
+    }
     const milestone = await Milestone.findOne({ _id: req.body.milestoneId });
     if (!milestone) {
       return res.sendError({ message: "Milestone not found." });
@@ -265,6 +314,16 @@ const releaseMilestonePayment = async (req, res) => {
     const user = await User.findOne({
       account: milestone.workerId,
     });
+
+    if (!user) {
+      return res.sendError({ message: "Worker not found." });
+    }
+
+    try {
+      assertStripeConnectOnboarded(user, "Worker");
+    } catch (stripeErr) {
+      return res.sendError({ message: getStripeErrorMessage(stripeErr) });
+    }
 
     await user.updateOne({
       totalEarnings: user.totalEarnings + transferAmount / 100,

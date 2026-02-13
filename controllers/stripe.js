@@ -39,6 +39,30 @@ const processStripeEvent = async (event) => {
   const type = event.type;
   const obj = event.data && event.data.object;
 
+  // Connected account status updates (Stripe Connect onboarding)
+  if (type === "account.updated") {
+    const account = obj;
+    const accountId = account?.id;
+    if (typeof accountId === "string" && accountId.trim().length > 0) {
+      const detailsSubmitted = account?.details_submitted === true;
+      const chargesEnabled = account?.charges_enabled === true;
+      const payoutsEnabled = account?.payouts_enabled === true;
+
+      // Production gating: treat onboarding as complete only when Stripe marks it ready.
+      const onboardingComplete = detailsSubmitted && chargesEnabled && payoutsEnabled;
+
+      await User.updateOne(
+        { account: accountId },
+        {
+          $set: {
+            stripeOnboardingComplete: onboardingComplete,
+          },
+        }
+      );
+    }
+    return;
+  }
+
   // Wallet top-ups are PaymentIntents created by createPaymentIntent()
   if (type === "payment_intent.succeeded" || type === "payment_intent.payment_failed") {
     const paymentIntent = obj;

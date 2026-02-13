@@ -28,6 +28,12 @@ const MilestoneSchema = new Schema(
       required: true,
       trim: true,
     },
+    link: {
+      type: String,
+      required: false,
+      trim: true,
+      default: null,
+    },
     status: {
       type: Number,
       default: MILESTONE_STATUS.PENDING,

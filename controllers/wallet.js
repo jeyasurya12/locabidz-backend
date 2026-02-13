@@ -1,4 +1,5 @@
 const { TRANSACTION_METHODS } = require("../constants/modelConstants");
+const mongoose = require("mongoose");
 const {
   createPaymentIntent,
   getAccount,
@@ -10,6 +11,7 @@ const {
 } = require("../lib/libStripe");
 const Fee = require("../model/fee");
 const Transaction = require("../model/transaction");
+const User = require("../model/user");
 
 const requireConnectedAccount = (req, res) => {
   const connectEnabled = process.env.STRIPE_CONNECT_ENABLED === "true";
@@ -35,13 +37,17 @@ const requireConnectedAccount = (req, res) => {
 
 const getWalletBalance = async (req, res) => {
   try {
-    if (!requireConnectedAccount(req, res)) return;
-    const balance = await getBalance({
-      account: req.user.account,
+    const user = await User.findOne({ _id: req.user._id }).select({
+      totalEarnings: 1,
     });
+
+    if (!user) {
+      return res.sendError({ message: "User not found" });
+    }
+
     return res.sendResponse({
       data: {
-        balance: balance.available[0].amount + balance.pending[0].amount,
+        balance: user.totalEarnings,
       },
     });
   } catch (err) {
@@ -63,19 +69,85 @@ const getWalletAccount = async (req, res) => {
 
 const addAmountToWallet = async (req, res) => {
   try {
-    if (!requireConnectedAccount(req, res)) return;
     const idempotencyKey = req.get("Idempotency-Key");
-    const payment = await createPaymentIntent({
-      account: req.user.account,
-      amount: req.body.amount,
-      idempotencyKey: idempotencyKey || undefined,
-      metadata: {
-        userId: String(req.user._id),
-        method: "ADD_AMOUNT",
-      },
-    });
-   
-    return res.sendResponse({ data: { clientSecret: payment.client_secret } });
+
+    const requestedAmount = Number(req.body.amount);
+    if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
+      return res.sendError({ message: "Invalid amount" });
+    }
+
+    const amount = Math.round(requestedAmount * 100) / 100;
+    if (amount <= 0) {
+      return res.sendError({ message: "Invalid amount" });
+    }
+
+    const session = await mongoose.startSession();
+    let out = null;
+
+    try {
+      await session.withTransaction(async () => {
+        const paymentId =
+          typeof idempotencyKey === "string" && idempotencyKey.trim().length > 0
+            ? `add-amount:${idempotencyKey.trim()}`
+            : undefined;
+
+        if (paymentId) {
+          const existing = await Transaction.findOne({
+            paymentId,
+            method: TRANSACTION_METHODS.ADD_AMOUNT,
+          }).session(session);
+
+          if (existing) {
+            const user = await User.findOne({ _id: req.user._id })
+              .select({ totalEarnings: 1 })
+              .session(session);
+            out = { transaction: existing, walletBalance: user?.totalEarnings };
+            return;
+          }
+        }
+
+        const updatedUser = await User.findOneAndUpdate(
+          { _id: req.user._id },
+          {
+            $inc: {
+              totalEarnings: amount,
+            },
+          },
+          {
+            new: true,
+            session,
+          }
+        );
+
+        if (!updatedUser) {
+          throw new Error("User not found");
+        }
+
+        const transaction = await Transaction.create(
+          [
+            {
+              paymentId,
+              amount,
+              feeAmount: 0,
+              method: TRANSACTION_METHODS.ADD_AMOUNT,
+              status: "completed",
+              stripeObjectType: null,
+              user: [req.user._id],
+            },
+          ],
+          { session }
+        );
+
+        out = {
+          transaction: Array.isArray(transaction) ? transaction[0] : transaction,
+          walletBalance: updatedUser.totalEarnings,
+        };
+      });
+    } finally {
+      await session.endSession();
+    }
+
+    return res.sendResponse({ data: out });
   } catch (err) {
     return res.sendError({ message: err.message });
   }
@@ -83,42 +155,99 @@ const addAmountToWallet = async (req, res) => {
 
 const withdrawAmount = async (req, res) => {
   try {
-    if (!requireConnectedAccount(req, res)) return;
     const idempotencyKey = req.get("Idempotency-Key");
-    const fee = await Fee.findOne({ _id: "amountWithdrawFee" });
-    if (!fee || typeof fee.percentage !== "number") {
-      return res.sendError({ message: "Withdraw fee is not configured" });
-    }
 
-    // Work in cents (integers) only. Stripe requires integer `amount`.
     const requestedAmount = Number(req.body.amount);
     if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
       return res.sendError({ message: "Invalid amount" });
     }
 
-    const feeAmount = Math.round(requestedAmount * (fee.percentage / 100));
-    const chargeAmount = Math.round(requestedAmount - feeAmount);
+    const amount = Math.round(requestedAmount * 100) / 100;
+    if (amount <= 0) {
+      return res.sendError({ message: "Invalid amount" });
+    }
 
-    if (chargeAmount < 1) {
+    const fee = await Fee.findOne({ _id: "amountWithdrawFee" });
+    if (!fee || typeof fee.percentage !== "number") {
+      return res.sendError({ message: "Withdraw fee is not configured" });
+    }
+
+    const feeAmount = Math.round(amount * (fee.percentage / 100) * 100) / 100;
+    const netAmount = Math.round((amount - feeAmount) * 100) / 100;
+    if (netAmount <= 0) {
       return res.sendError({ message: "Amount is too small after fees" });
     }
 
-    const payment = await createPayout({
-      account: req.user.account,
-      amount: chargeAmount,
-      fee: feeAmount,
-      idempotencyKey: idempotencyKey || undefined,
-    });
-    await Transaction.create({
-      paymentId: payment.id,
-      amount: requestedAmount / 100,
-      feeAmount: feeAmount / 100,
-      method: TRANSACTION_METHODS.WITHDRAW_AMOUNT,
-      status: "pending",
-      stripeObjectType: "payout",
-      user: req.user._id,
-    });
-    return res.sendResponse({ data: { payment } });
+    const session = await mongoose.startSession();
+    let out = null;
+
+    try {
+      await session.withTransaction(async () => {
+        const paymentId =
+          typeof idempotencyKey === "string" && idempotencyKey.trim().length > 0
+            ? `withdraw:${idempotencyKey.trim()}`
+            : undefined;
+
+        if (paymentId) {
+          const existing = await Transaction.findOne({
+            paymentId,
+            method: TRANSACTION_METHODS.WITHDRAW_AMOUNT,
+          }).session(session);
+          if (existing) {
+            const user = await User.findOne({ _id: req.user._id })
+              .select({ totalEarnings: 1 })
+              .session(session);
+            out = { transaction: existing, walletBalance: user?.totalEarnings };
+            return;
+          }
+        }
+
+        const updatedUser = await User.findOneAndUpdate(
+          {
+            _id: req.user._id,
+            totalEarnings: { $gte: amount },
+          },
+          {
+            $inc: {
+              totalEarnings: -amount,
+            },
+          },
+          {
+            new: true,
+            session,
+          }
+        );
+
+        if (!updatedUser) {
+          throw new Error("Insufficiet balance.");
+        }
+
+        const transaction = await Transaction.create(
+          [
+            {
+              paymentId,
+              amount,
+              feeAmount,
+              method: TRANSACTION_METHODS.WITHDRAW_AMOUNT,
+              status: "pending",
+              stripeObjectType: null,
+              user: [req.user._id],
+            },
+          ],
+          { session }
+        );
+
+        out = {
+          transaction: Array.isArray(transaction) ? transaction[0] : transaction,
+          walletBalance: updatedUser.totalEarnings,
+          netAmount,
+        };
+      });
+    } finally {
+      await session.endSession();
+    }
+
+    return res.sendResponse({ data: out });
   } catch (err) {
     return res.sendError({ message: err.message });
   }

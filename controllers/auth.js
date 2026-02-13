@@ -28,76 +28,76 @@ const signup = async (req, res) => {
       password: hash,
     });
 
-    if (process.env.STRIPE_CONNECT_ENABLED === "true") {
-      try {
-        const account = await createConnectAccount({ user: user });
-        if (!account) {
-          return res.sendError({ message: "Failed to create an account!" });
-        }
-        await user.updateOne({
-          account: account.id,
+    // if (process.env.STRIPE_CONNECT_ENABLED === "true") {
+    //   try {
+    //     const account = await createConnectAccount({ user: user });
+    //     if (!account) {
+    //       return res.sendError({ message: "Failed to create an account!" });
+    //     }
+    //     await user.updateOne({
+    //       account: account.id,
+    //     });
+    //   } catch (stripeErr) {
+    //     return res.sendError({
+    //       message: stripeErr?.message || "Failed to create Stripe Connect account.",
+    //     });
+    //   }
+    // }
+
+    try {
+      const serverBaseUrl = process.env.SERVER_URL || process.env.SERVER_DOMAIN;
+      if (serverBaseUrl) {
+        await sendMail({
+          to: email,
+          subject: "Verify Your Email",
+          html: `<b>Please verify your email to access Locabidz <a href="${serverBaseUrl}/api/v1/auth/verify-email/${verifyToken}">Click here</a></b>`,
         });
-      } catch (stripeErr) {
+      }
+    } catch (mailErr) {
+      return res.sendError({
+        message:
+          mailErr?.message ||
+          "Failed to send verification email. Please contact support.",
+        statusCode: 500,
+      });
+    }
+    try {
+      await sendMail({
+        to: email,
+        html: `
+      <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.5;">
+          <h2 style="color: #007BFF;">Verify Your Email</h2>
+          <p>Hello,</p>
+          <p>Thank you for signing up! Please verify your email address to access Locabidz.</p>
+          <p>Click the button below to complete your verification:</p>
+          <a href="${process.env.SERVER_URL}/api/v1/auth/verify-email/${verifyToken}" 
+             style="display: inline-block; padding: 10px 20px; background-color: #007BFF; 
+                    color: #ffffff; text-decoration: none; border-radius: 5px;">
+             Verify Email
+          </a>
+          <p>If the button above does not work, you can also copy and paste the following link into your browser:</p>
+          <p><a href="${process.env.SERVER_URL}/api/v1/auth/verify-email/${verifyToken}">
+              ${process.env.SERVER_URL}/api/v1/auth/verify-email/${verifyToken}
+          </a></p>
+          <p>If you did not request this, please ignore this email.</p>
+          <p>Best regards,<br>Locabidz Team</p>
+      </div>
+  `,
+      });
+    } catch (mailErr) {
+      if (process.env.NODE_ENV !== "production") {
+        console.log(
+          "Signup email failed; continuing in non-production. Verify URL:",
+          `${process.env.SERVER_URL}/api/v1/auth/verify-email/${verifyToken}`
+        );
+      } else {
         return res.sendError({
-          message: stripeErr?.message || "Failed to create Stripe Connect account.",
+          message:
+            mailErr?.message ||
+            "Failed to send verification email. Please contact support.",
         });
       }
     }
-
-    // try {
-    //   const serverBaseUrl = process.env.SERVER_URL || process.env.SERVER_DOMAIN;
-    //   if (serverBaseUrl) {
-    //     await sendMail({
-    //       to: email,
-    //       subject: "Verify Your Email",
-    //       html: `<b>Please verify your email to access Locabidz <a href="${serverBaseUrl}/api/v1/auth/verify-email/${verifyToken}">Click here</a></b>`,
-    //     });
-    //   }
-    // } catch (mailErr) {
-    //   return res.sendError({
-    //     message:
-    //       mailErr?.message ||
-    //       "Failed to send verification email. Please contact support.",
-    //     statusCode: 500,
-    //   });
-    // }
-  //   try {
-  //     await sendMail({
-  //       to: email,
-  //       html: `
-  //     <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.5;">
-  //         <h2 style="color: #007BFF;">Verify Your Email</h2>
-  //         <p>Hello,</p>
-  //         <p>Thank you for signing up! Please verify your email address to access Locabidz.</p>
-  //         <p>Click the button below to complete your verification:</p>
-  //         <a href="${process.env.SERVER_URL}/api/v1/auth/verify-email/${verifyToken}" 
-  //            style="display: inline-block; padding: 10px 20px; background-color: #007BFF; 
-  //                   color: #ffffff; text-decoration: none; border-radius: 5px;">
-  //            Verify Email
-  //         </a>
-  //         <p>If the button above does not work, you can also copy and paste the following link into your browser:</p>
-  //         <p><a href="${process.env.SERVER_URL}/api/v1/auth/verify-email/${verifyToken}">
-  //             ${process.env.SERVER_URL}/api/v1/auth/verify-email/${verifyToken}
-  //         </a></p>
-  //         <p>If you did not request this, please ignore this email.</p>
-  //         <p>Best regards,<br>Locabidz Team</p>
-  //     </div>
-  // `,
-  //     });
-  //   } catch (mailErr) {
-  //     if (process.env.NODE_ENV !== "production") {
-  //       console.log(
-  //         "Signup email failed; continuing in non-production. Verify URL:",
-  //         `${process.env.SERVER_URL}/api/v1/auth/verify-email/${verifyToken}`
-  //       );
-  //     } else {
-  //       return res.sendError({
-  //         message:
-  //           mailErr?.message ||
-  //           "Failed to send verification email. Please contact support.",
-  //       });
-  //     }
-  //   }
     await Log.create({
       log: "log_2",
       user: user._id,

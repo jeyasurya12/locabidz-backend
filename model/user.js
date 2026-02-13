@@ -258,6 +258,10 @@ const UsersSchema = new Schema(
       type: String,
       default: null,
     },
+    stripeOnboardingComplete: {
+      type: Boolean,
+      default: false,
+    },
     activeJobs: {
       type: Number,
       default: 0,
