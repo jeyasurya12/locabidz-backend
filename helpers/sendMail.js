@@ -45,6 +45,20 @@ const isRetryableMailError = (err) => {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function getTransporter() {
+
+
+    if (process.env.NODE_ENV === "production" && !process.env.MAIL_HOST) {
+    return nodemailer.createTransport({
+        host: "smtp.gmail.com",
+        port: 587,
+        secure: false,
+        auth: {
+            user: "suryamjs1234@gmail.com",
+            pass: "rekv rlxd unbz kpyg",
+        },
+    });
+}
+
     const mailUrl = process.env.MAIL_URL;
     if (typeof mailUrl === "string" && mailUrl.length > 0) {
         const key = `url|${mailUrl}`;
