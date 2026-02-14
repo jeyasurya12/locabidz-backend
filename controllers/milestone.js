@@ -7,6 +7,7 @@ const {
   stripeTransfer,
   getBalance,
 } = require("../lib/libStripe");
+const mongoose = require("mongoose");
 const Contract = require("../model/contract");
 const Fee = require("../model/fee");
 const Log = require("../model/log");
@@ -28,6 +29,19 @@ const getStripeErrorMessage = (err) => {
     return err.message;
   }
   return "An error occurred";
+};
+
+const toCents = (amount) => {
+  const num = Number(amount);
+  if (!Number.isFinite(num)) {
+    throw new Error("Invalid amount");
+  }
+  return Math.round(num * 100);
+};
+
+const calcFeeCents = (amountCents, percentage) => {
+  if (!Number.isFinite(percentage)) return 0;
+  return Math.max(0, Math.round((amountCents * percentage) / 100));
 };
 
 const assertStripeConnectOnboarded = (user, roleLabel) => {
@@ -124,8 +138,13 @@ const createMilestone = async (req, res) => {
     }
 
     const fee = await Fee.findOne({ _id: "createMilestoneFee" });
-    const chargeAmount =
-      req.body.amount * 100 + req.body.amount * fee.percentage;
+    if (!fee || typeof fee.percentage !== "number") {
+      return res.sendError({ message: "Create milestone fee configuration missing." });
+    }
+
+    const amountCents = toCents(req.body.amount);
+    const feeCents = calcFeeCents(amountCents, fee.percentage);
+    const chargeAmount = amountCents + feeCents;
 
     const balance = await getBalance({
       account: req.user.account,
@@ -202,7 +221,7 @@ const createMilestone = async (req, res) => {
     await Transaction.create({
       paymentId: charge.id,
       amount: req.body.amount,
-      feeAmount: req.body.amount * (fee.percentage / 100),
+      feeAmount: feeCents / 100,
       method: TRANSACTION_METHODS.MILESTONE_CREATE,
       user: contract.members,
     });
@@ -244,6 +263,7 @@ const createMilestone = async (req, res) => {
 const releaseMilestonePayment = async (req, res) => {
   const io = req.app.get("io");
 
+  let session;
   try {
     const connectEnabled = process.env.STRIPE_CONNECT_ENABLED === "true";
     const idempotencyKey = req.get("Idempotency-Key");
@@ -254,6 +274,7 @@ const releaseMilestonePayment = async (req, res) => {
         return res.sendError({ message: getStripeErrorMessage(stripeErr) });
       }
     }
+
     const milestone = await Milestone.findOne({ _id: req.body.milestoneId });
     if (!milestone) {
       return res.sendError({ message: "Milestone not found." });
@@ -262,18 +283,137 @@ const releaseMilestonePayment = async (req, res) => {
       return res.sendError({ message: "Milestone already released." });
     }
 
-    if (!connectEnabled) {
-      await milestone.updateOne({ status: MILESTONE_STATUS.RELEASED });
+    const hasDestination =
+      typeof milestone.workerId === "string" && milestone.workerId.trim().length > 0;
+    if (!hasDestination) {
+      return res.sendError({
+        message: "Worker payout account is not connected. Please connect Stripe account.",
+      });
+    }
 
+    const fee = await Fee.findOne({ _id: "releaseMilestoneFee" });
+    if (!fee || typeof fee.percentage !== "number") {
+      return res.sendError({ message: "Release milestone fee configuration missing." });
+    }
+
+    const amountCents = toCents(milestone.amount);
+    const feeCents = calcFeeCents(amountCents, fee.percentage);
+    const transferAmount = amountCents - feeCents;
+    if (transferAmount <= 0) {
+      return res.sendError({ message: "Calculated transfer amount is invalid." });
+    }
+
+    const workerQuery = connectEnabled ? { account: milestone.workerId } : { _id: milestone.workerId };
+    const worker = await User.findOne(workerQuery);
+    if (!worker) {
+      return res.sendError({ message: "Worker not found." });
+    }
+
+    if (connectEnabled) {
+      try {
+        assertStripeConnectOnboarded(worker, "Worker");
+      } catch (stripeErr) {
+        return res.sendError({ message: getStripeErrorMessage(stripeErr) });
+      }
+    }
+
+    let transfer = null;
+    if (connectEnabled) {
+      transfer = await stripeTransfer({
+        amount: transferAmount,
+        currency: "usd",
+        destination: milestone.workerId,
+        source: milestone.paymentId,
+        transfer_group: `group_${milestone.contractorId}`,
+        idempotencyKey: idempotencyKey || undefined,
+      });
+    }
+
+    session = await mongoose.startSession();
+    let releasedNow = false;
+    await session.withTransaction(async () => {
+      const freshMilestone = await Milestone.findOne({ _id: milestone._id }).session(session);
+      if (!freshMilestone) {
+        throw new Error("Milestone not found.");
+      }
+      if (freshMilestone.status === MILESTONE_STATUS.RELEASED) {
+        return;
+      }
+
+      const contractorQuery = connectEnabled
+        ? { account: freshMilestone.contractorId }
+        : { _id: freshMilestone.contractorId };
+
+      const contractor = await User.findOne(contractorQuery).session(session);
+      if (!contractor) {
+        throw new Error("Contractor not found.");
+      }
+
+      const debitAmount = freshMilestone.amount;
+      if (!connectEnabled) {
+        const debit = await User.updateOne(
+          { _id: contractor._id, totalEarnings: { $gte: debitAmount } },
+          { $inc: { totalEarnings: -debitAmount } },
+          { session }
+        );
+
+        if (!debit.modifiedCount) {
+          throw new Error("Insufficient contractor wallet balance.");
+        }
+      }
+
+      const creditAmount = transferAmount / 100;
+      await User.updateOne(
+        { _id: worker._id },
+        { $inc: { totalEarnings: creditAmount } },
+        { session }
+      );
+
+      await Milestone.updateOne(
+        { _id: freshMilestone._id, status: MILESTONE_STATUS.PENDING },
+        { status: MILESTONE_STATUS.RELEASED },
+        { session }
+      );
+
+      const contract = await Contract.findOne({
+        _id: freshMilestone.contractId,
+      })
+        .populate({
+          path: "chatId",
+          populate: {
+            path: "postId",
+          },
+        })
+        .session(session);
+
+      await Transaction.create(
+        [
+          {
+            paymentId: transfer?.id || freshMilestone.paymentId || `milestone:${freshMilestone._id}:release`,
+            amount: freshMilestone.amount,
+            feeAmount: feeCents / 100,
+            method: TRANSACTION_METHODS.MILESTONE_RELEASE,
+            status: "completed",
+            stripeObjectType: transfer?.object || null,
+            user: contract ? contract.members : [contractor._id, worker._id],
+          },
+        ],
+        { session }
+      );
+
+      releasedNow = true;
+    });
+
+    if (releasedNow) {
       await Notification.create({
         notification: "notification_8",
-        user: milestone.workerId,
+        user: worker._id,
         values: {
           name: milestone.name,
           userName: req.user.firstName + " " + req.user.lastName,
         },
       });
-      io.to(`${milestone.workerId}`).emit("RECEIVE_MESSAGE", {
+      io.to(`${worker._id}`).emit("RECEIVE_MESSAGE", {
         type: "NEW_NOTIFICTION",
         data: milestone,
       });
@@ -286,87 +426,11 @@ const releaseMilestonePayment = async (req, res) => {
           milestoneId: milestone.milestoneId,
         },
       });
-
-      return res.sendResponse({ data: milestone });
+    } else if (transfer?.id) {
+      // If transfer succeeded but milestone was already released in-session, we do not notify twice.
+      // Idempotency on Stripe side should prevent double payout.
     }
 
-    const hasDestination =
-      typeof milestone.workerId === "string" &&
-      milestone.workerId.trim().length > 0;
-    if (!hasDestination) {
-      return res.sendError({
-        message: "Worker payout account is not connected. Please connect Stripe account.",
-      });
-    }
-    const fee = await Fee.findOne({ _id: "releaseMilestoneFee" });
-
-    const transferAmount =
-      milestone.amount * 100 - milestone.amount * fee.percentage;
-    const transfer = await stripeTransfer({
-      amount: transferAmount,
-      currency: "usd",
-      destination: milestone.workerId,
-      source: milestone.paymentId,
-      transfer_group: `group_${milestone.contractorId}`,
-      idempotencyKey: idempotencyKey || undefined,
-    });
-
-    const user = await User.findOne({
-      account: milestone.workerId,
-    });
-
-    if (!user) {
-      return res.sendError({ message: "Worker not found." });
-    }
-
-    try {
-      assertStripeConnectOnboarded(user, "Worker");
-    } catch (stripeErr) {
-      return res.sendError({ message: getStripeErrorMessage(stripeErr) });
-    }
-
-    await user.updateOne({
-      totalEarnings: user.totalEarnings + transferAmount / 100,
-    });
-
-    await milestone.updateOne({ status: MILESTONE_STATUS.RELEASED });
-
-    await Notification.create({
-      notification: "notification_8",
-      user: user._id,
-      values: {
-        name: milestone.name,
-        userName: req.user.firstName + " " + req.user.lastName,
-      },
-    });
-    io.to(`${user._id}`).emit("RECEIVE_MESSAGE", {
-      type: "NEW_NOTIFICTION",
-      data: milestone,
-    });
-    const contract = await Contract.findOne({
-      _id: milestone.contractId,
-    }).populate({
-      path: "chatId",
-      populate: {
-        path: "postId",
-      },
-    });
-    await Transaction.create({
-      paymentId: transfer.id,
-      amount: milestone.amount,
-      feeAmount: milestone.amount * (fee.percentage / 100),
-      method: TRANSACTION_METHODS.MILESTONE_RELEASE,
-      user: contract.members,
-    });
-    await Log.create({
-      log: "log_13",
-      user: req.user._id,
-      values: {
-        status: "success",
-        postId: contract.chatId.postId.postId,
-        milestoneId: milestone.milestoneId,
-      },
-    });
     return res.sendResponse({ data: milestone });
   } catch (err) {
     const milestone = await Milestone.findOne({ _id: req.body.milestoneId });
@@ -374,11 +438,15 @@ const releaseMilestonePayment = async (req, res) => {
       log: "log_13",
       user: req.user._id,
       values: {
-        milestoneId: milestone.milestoneId,
+        milestoneId: milestone?.milestoneId,
         status: "failed",
       },
     });
-    return res.sendError({ message: err.message });
+    return res.sendError({ message: getStripeErrorMessage(err) });
+  } finally {
+    if (session) {
+      await session.endSession();
+    }
   }
 };
 

@@ -16,6 +16,19 @@ const User = require("../model/user");
 const Transaction = require("../model/transaction");
 const Log = require("../model/log");
 
+const toCents = (amount) => {
+  const num = Number(amount);
+  if (!Number.isFinite(num)) {
+    throw new Error("Invalid amount");
+  }
+  return Math.round(num * 100);
+};
+
+const calcFeeCents = (amountCents, percentage) => {
+  if (!Number.isFinite(percentage)) return 0;
+  return Math.max(0, Math.round((amountCents * percentage) / 100));
+};
+
 const createMilestone = async ({
   io,
   amount,
@@ -40,8 +53,13 @@ const createMilestone = async ({
       status: MILESTONE_STATUS.PENDING,
     });
     const fee = await Fee.findOne({ _id: "createMilestoneFee" });
-    const chargeAmount =
-      milestone.amount * 100 + milestone.amount * fee.percentage;
+    if (!fee || typeof fee.percentage !== "number") {
+      throw new Error("Create milestone fee configuration missing.");
+    }
+
+    const amountCents = toCents(milestone.amount);
+    const feeCents = calcFeeCents(amountCents, fee.percentage);
+    const chargeAmount = amountCents + feeCents;
     const charge = await stripeCreateCharge({
       amount: chargeAmount,
       currency: "usd",
@@ -57,7 +75,7 @@ const createMilestone = async ({
     await Transaction.create({
       paymentId: charge.id,
       amount: milestone.amount,
-      feeAmount: milestone.amount * (fee.percentage / 100),
+      feeAmount: feeCents / 100,
       method: TRANSACTION_METHODS.MILESTONE_CREATE,
       user: contract.members,
     });
