@@ -97,9 +97,10 @@ module.exports = (app) => {
         lastName: Joi.string().required(),
         profilePicture: Joi.string().optional(),
         contractor: Joi.object({
+          address: Joi.string().optional().allow(""),
           tradeName: Joi.string().required(),
           description: Joi.string().optional(),
-          tradeType: Joi.string().optional(),
+          tradeType: Joi.string().optional().allow(""),
           documents: Joi.array().optional(),
         }).required(),
         bankAccount: Joi.object({
