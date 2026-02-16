@@ -143,6 +143,7 @@ function getTransporter() {
       user: "suryamjs1234@gmail.com",
       pass: "rekv rlxd unbz kpyg",
     },
+    connectionTimeout: 10000,
     tls: {
       rejectUnauthorized: false,
     },
