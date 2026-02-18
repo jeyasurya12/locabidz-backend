@@ -5,6 +5,7 @@ const {
   getMessages,
   getChats,
   createChat,
+  createDirectChat,
 } = require("../controllers/chat");
 const validateJwtToken = require("../middlewares/auth");
 
@@ -22,6 +23,17 @@ module.exports = (app) => {
       }),
     }),
     createChat
+  );
+
+  router.post(
+    "/create-direct",
+    validateJwtToken,
+    celebrate({
+      [Segments.BODY]: Joi.object().keys({
+        receiverId: Joi.string().required(),
+      }),
+    }),
+    createDirectChat
   );
 
   router.post(

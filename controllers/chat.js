@@ -11,6 +11,74 @@ const getChatId = (sender, receiver) => {
     .join("-");
 };
 
+const createDirectChat = async (req, res) => {
+  const io = req.app.get("io");
+  try {
+    const receiverId = req.body.receiverId;
+
+    if (!receiverId) {
+      return res.sendError({ message: "receiverId is required" });
+    }
+
+    if (`${receiverId}` === `${req.user._id}`) {
+      return res.sendError({ message: "Invalid receiver" });
+    }
+
+    const chatId = getChatId(req.user._id, receiverId);
+    let chat = await Chat.findOne({ chatId });
+
+    if (!chat) {
+      chat = await Chat.create({
+        chatId,
+        members: [`${req.user._id}`, `${receiverId}`],
+      });
+    }
+
+    const newChat = await Chat.findOne({ chatId })
+      .populate({
+        path: "members",
+        select: {
+          firstName: 1,
+          lastName: 1,
+          _id: 1,
+          updatedAt: 1,
+        },
+      })
+      .populate({
+        path: "lastMessageId",
+      })
+      .populate({
+        path: "postId",
+      })
+      .populate({
+        path: "attachments",
+      });
+
+    (newChat?.members || []).forEach((mem) => {
+      io.to(`${mem._id}`).emit("RECEIVE_MESSAGE", {
+        type: "UPDATE_CHAT",
+        data: {
+          ...newChat.toObject(),
+          receiver: newChat.members.find(
+            (member) => `${member._id}` !== `${mem._id}`
+          ),
+        },
+      });
+    });
+
+    return res.sendResponse({
+      data: {
+        ...newChat.toObject(),
+        receiver: newChat.members.find(
+          (member) => `${member._id}` !== `${req.user._id}`
+        ),
+      },
+    });
+  } catch (err) {
+    return res.sendError({ message: err.message });
+  }
+};
+
 const createChat = async (req, res) => {
   const io = req.app.get("io");
 
@@ -261,6 +329,7 @@ const getChats = async (req, res) => {
 module.exports = {
   messageCreate,
   createChat,
+  createDirectChat,
   createMessage,
   getMessages,
   getChats,
